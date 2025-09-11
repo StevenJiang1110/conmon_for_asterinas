@@ -61,6 +61,8 @@ int main(int argc, char *argv[])
 	/* Catch SIGTERM and call exit(). This causes the atexit functions to be called. */
 	signal(SIGTERM, handle_signal);
 
+	printf("CONMON: get pipe fd from env \n");
+
 	int start_pipe_fd = get_pipe_fd_from_env("_OCI_STARTPIPE");
 	if (start_pipe_fd > 0) {
 		/* Block for an initial write to the start pipe before
@@ -76,6 +78,8 @@ int main(int argc, char *argv[])
 			close(start_pipe_fd);
 	}
 
+	printf("CONMON: open dev nulll \n");
+
 	dev_null_r_cleanup = dev_null_r = open("/dev/null", O_RDONLY | O_CLOEXEC);
 	if (dev_null_r < 0)
 		pexit("Failed to open /dev/null");
@@ -83,6 +87,8 @@ int main(int argc, char *argv[])
 	dev_null_w_cleanup = dev_null_w = open("/dev/null", O_WRONLY | O_CLOEXEC);
 	if (dev_null_w < 0)
 		pexit("Failed to open /dev/null");
+
+	printf("CONMON: opt sync\n");
 
 	/* In the non-sync case, we double-fork in
 	 * order to disconnect from the parent, as we want to
@@ -107,11 +113,14 @@ int main(int argc, char *argv[])
 	/* before we fork, ensure our children will be reaped */
 	atexit(reap_children);
 
+	printf("CONMON: setup notify socket\n");
+
 	/* If we were passed a sd-notify socket to use, set it up now */
 	if (opt_sdnotify_socket) {
 		setup_notify_socket(opt_sdnotify_socket);
 	}
 
+	printf("CONMON: get pipe fd from env OCI_SYNCPIPE\n");
 	/* Environment variables */
 	sync_pipe_fd = get_pipe_fd_from_env("_OCI_SYNCPIPE");
 
@@ -122,6 +131,7 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	printf("CONMON: Disconnect stdio from parent\n");
 
 	/* Disconnect stdio from parent. We need to do this, because
 	   the parent is waiting for the stdout to end when the intermediate
@@ -139,6 +149,8 @@ int main(int argc, char *argv[])
 	if (ret != 0) {
 		pexit("Failed to set as subreaper");
 	}
+
+	printf("CONMON: opt terminal\n");
 
 	_cleanup_free_ char *csname = NULL;
 	_cleanup_free_ char *seccomp_listener = NULL;
@@ -178,6 +190,8 @@ int main(int argc, char *argv[])
 		workerfd_stdout = fds[1];
 	}
 
+	printf("CONMON: opt seccomp notify socket\n");
+
 	if (opt_seccomp_notify_socket != NULL) {
 #ifdef USE_SECCOMP
 		pexit("seccomp support not present");
@@ -195,6 +209,8 @@ int main(int argc, char *argv[])
 
 	mainfd_stderr = fds[0];
 	workerfd_stderr = fds[1];
+
+	printf("CONMON: configure runtime args\n");
 
 	GPtrArray *runtime_argv = configure_runtime_args(csname);
 
@@ -224,11 +240,14 @@ int main(int argc, char *argv[])
 	 * won't be the case for very long.
 	 */
 
+	printf("CONMON: create our container\n");
+
 	/* Create our container. */
 	create_pid = fork();
 	if (create_pid < 0) {
 		pexit("Failed to fork the create command");
 	} else if (!create_pid) {
+		printf("CONMON: parent process: create_pid = %d\n", create_pid);
 		if (set_pdeathsig(SIGKILL) < 0)
 			_pexit("Failed to set PDEATHSIG");
 		if (sigprocmask(SIG_SETMASK, &oldmask, NULL) < 0)
@@ -299,8 +318,10 @@ int main(int argc, char *argv[])
 		exit(127);
 	}
 
-	if (logging_is_passthrough())
-		disconnect_std_streams(dev_null_r, dev_null_w);
+	printf("CONMON: child process: create_pid = %d\n", create_pid);
+
+	// if (logging_is_passthrough())
+	// 	disconnect_std_streams(dev_null_r, dev_null_w);
 
 	if ((signal(SIGTERM, on_sig_exit) == SIG_ERR) || (signal(SIGQUIT, on_sig_exit) == SIG_ERR)
 	    || (signal(SIGINT, on_sig_exit) == SIG_ERR))
@@ -310,6 +331,7 @@ int main(int argc, char *argv[])
 	if (sigprocmask(SIG_SETMASK, &oldmask, NULL) < 0)
 		pexit("Failed to unblock signals");
 
+	printf("CONMON: map pid to its handler\n");
 	/* Map pid to its handler.  */
 	_cleanup_hashtable_ GHashTable *pid_to_handler = g_hash_table_new(g_int_hash, g_int_equal);
 	g_hash_table_insert(pid_to_handler, (pid_t *)&create_pid, runtime_exit_cb);
@@ -319,10 +341,14 @@ int main(int argc, char *argv[])
 		.pid_to_handler = pid_to_handler,
 		.exit_status_cache = NULL,
 	};
+
+	printf("CONMON: child process create signal fd\n");
 	int signal_fd = get_signal_descriptor();
 	if (signal_fd < 0)
 		pexit("Failed to create signalfd");
 	int signal_fd_tag = g_unix_fd_add(signal_fd, G_IO_IN, on_signalfd_cb, &data);
+
+	printf("CONMON: child process opt exit command\n");
 
 	if (opt_exit_command)
 		atexit(do_exit_command);
@@ -340,6 +366,8 @@ int main(int argc, char *argv[])
 	if (seccomp_listener != NULL)
 		g_unix_fd_add(seccomp_socket_fd, G_IO_IN, seccomp_accept_cb, csname);
 
+	printf("CONMON: csname = %s\n", csname);
+
 	if (csname != NULL) {
 		g_unix_fd_add(console_socket_fd, G_IO_IN, terminal_accept_cb, csname);
 		/* Process any SIGCHLD we may have missed before the signal handler was in place.  */
@@ -351,10 +379,12 @@ int main(int argc, char *argv[])
 		}
 	} else {
 		int ret;
+		printf("CONMON: Wait for our create child to exit with the return code\n");
 		/* Wait for our create child to exit with the return code. */
 		do
 			ret = waitpid(create_pid, &runtime_status, 0);
 		while (ret < 0 && errno == EINTR);
+		printf("CONMON: Wait for our create child returns\n");
 		if (ret < 0) {
 			if (create_pid > 0) {
 				int old_errno = errno;
@@ -365,6 +395,7 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	printf("CONMON: runtime status\n");
 	if (!WIFEXITED(runtime_status) || WEXITSTATUS(runtime_status) != 0) {
 		/*
 		 * Read from container stderr for any error and send it to parent
@@ -388,6 +419,8 @@ int main(int argc, char *argv[])
 	if (opt_terminal && mainfd_stdout == -1)
 		nexit("Runtime did not set up terminal");
 
+	printf("CONMON: Read the pid\n");
+
 	/* Read the pid so we can wait for the process to exit */
 	_cleanup_free_ char *contents = NULL;
 	if (!g_file_get_contents(opt_container_pid_file, &contents, NULL, &err)) {
@@ -397,6 +430,7 @@ int main(int argc, char *argv[])
 
 	container_pid = atoi(contents);
 	ndebugf("container PID: %d", container_pid);
+	printf("CONMON: container PID: %d\n", container_pid);
 
 	g_hash_table_insert(pid_to_handler, (pid_t *)&container_pid, container_exit_cb);
 
@@ -405,8 +439,13 @@ int main(int argc, char *argv[])
 	 * conmon to only send one value down this pipe, which will later be the exit code
 	 * Thus, if we are legacy and we are exec, skip this write.
 	 */
-	if ((opt_api_version >= 1 || !opt_exec) && sync_pipe_fd >= 0)
+
+	printf("CONMON: opt api version = %d, opt_exec = %d, sync_pipe_fd = %d\n", opt_api_version, opt_exec, sync_pipe_fd);
+	if ((opt_api_version >= 1 || !opt_exec) && sync_pipe_fd >= 0) {
+		printf("CONMON: write or close sync fd\n");
 		write_or_close_sync_fd(&sync_pipe_fd, container_pid, NULL);
+	}
+		
 
 #ifdef __linux__
 	setup_oom_handling(container_pid);
@@ -422,6 +461,8 @@ int main(int argc, char *argv[])
 	if (opt_timeout > 0) {
 		g_timeout_add_seconds(opt_timeout, timeout_cb, NULL);
 	}
+
+	printf("CONMON: data.exit_status_cache\n");
 
 	if (data.exit_status_cache) {
 		GHashTableIter iter;
@@ -455,24 +496,35 @@ int main(int argc, char *argv[])
 		but are not terminal. In this case, we still want to run to process all of the output,
 		but will need to exit once all the i/o is read. This will be handled in stdio_cb above.
 	*/
+
+	printf("CONMON: main loop run\n");
 	if (opt_api_version < 1 || !opt_exec || !opt_terminal || container_status < 0) {
 		g_idle_add(check_child_processes_cb, &data);
 		g_main_loop_run(main_loop);
+		// sleep(3);
 	}
+
+	printf("CONMON: check cgroup2 oom\n");
 
 #ifdef __linux__
 	check_cgroup2_oom();
 #endif
 
+	printf("CONMON: drain stdio\n");
+
 	/* Drain stdout and stderr only if a timeout doesn't occur */
 	if (!timed_out)
 		drain_stdio();
+
+	printf("CONMON: sync logs\n");
 
 	if (!opt_no_sync_log)
 		sync_logs();
 
 	int exit_status = -1;
 	const char *exit_message = NULL;
+
+	printf("CONMON: kill container\n");
 
 	/*
 	 * If timed_out is TRUE but container_pid is -1, the process must have died before
@@ -490,6 +542,8 @@ int main(int argc, char *argv[])
 	} else {
 		exit_status = get_exit_status(container_status);
 	}
+
+	printf("CONMON: close signal fd\n");
 
 	/* Close down the signalfd */
 	g_source_remove(signal_fd_tag);

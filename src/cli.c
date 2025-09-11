@@ -145,6 +145,7 @@ void process_cli()
 	/* Command line parameters */
 	set_conmon_logs(opt_log_level, opt_cid, opt_syslog, opt_log_tag);
 
+	printf("CONMON: My conmon\n");
 
 	main_loop = g_main_loop_new(NULL, FALSE);
 

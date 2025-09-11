@@ -51,6 +51,7 @@ void write_or_close_sync_fd(int *fd, int res, const char *message)
 	}
 
 	len = strlen(json);
+	printf("CONMON: write josn = %s\n", json);
 	if (write_all(*fd, json, len) != len) {
 		if (errno == EPIPE) {
 			close(*fd);

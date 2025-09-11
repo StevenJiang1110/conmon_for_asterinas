@@ -12,7 +12,7 @@
 #include <sys/event.h>
 #endif
 
-log_level_t log_level = WARN_LEVEL;
+log_level_t log_level = DEBUG_LEVEL;
 char *log_cid = NULL;
 gboolean use_syslog = FALSE;
 

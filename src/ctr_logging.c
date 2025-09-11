@@ -26,7 +26,7 @@ static inline int sd_journal_sendv(G_GNUC_UNUSED const struct iovec *iov, G_GNUC
 /* Different types of container logging */
 static gboolean use_journald_logging = FALSE;
 static gboolean use_k8s_logging = FALSE;
-static gboolean use_logging_passthrough = FALSE;
+static gboolean use_logging_passthrough = TRUE;
 
 /* Value the user must input for each log driver */
 static const char *const K8S_FILE_STRING = "k8s-file";
